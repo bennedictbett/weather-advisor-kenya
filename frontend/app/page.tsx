@@ -26,6 +26,7 @@ interface WeatherResult {
     crop_context: string;
     risk_flags: string[];
     recommendations: string[];
+    ai_narrative?: string;
   };
 }
 
@@ -182,6 +183,15 @@ export default function Home() {
                 {result.farming_advisory.crop_context &&
                   ` — ${result.farming_advisory.crop_context}`}
               </h2>
+
+              {result.farming_advisory.ai_narrative && (
+                <div className="mb-4 rounded-xl bg-gradient-to-r from-[#1a472a] to-[#2d6a4f] p-4 text-sm text-white">
+                  <div className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-white/80">
+                    <span>🤖</span> AI Advisory
+                  </div>
+                  {result.farming_advisory.ai_narrative}
+                </div>
+              )}
 
               {result.farming_advisory.risk_flags.length > 0 && (
                 <div className="mb-3 flex flex-wrap gap-2">
