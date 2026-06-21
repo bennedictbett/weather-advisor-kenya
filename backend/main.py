@@ -1,13 +1,9 @@
-"""
-Shamba Weather Advisor — WeatherAI API Integration
-A hyperlocal weather advisory tool for Kenyan farmers, combining
-WeatherAI's forecast + tree analysis APIs with an LLM-generated
-farming-specific recommendation layer.
-"""
+
 
 import os
 import httpx
 import json
+import time
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -21,6 +17,32 @@ WEATHER_AI_BASE = "https://api.weather-ai.co"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_BASE = "https://api.groq.com/openai/v1"
+
+# Simple in-memory cache: { cache_key: (timestamp, response_dict) }
+# Avoids redundant calls to WeatherAI for the same location/params within TTL.
+# A dict is sufficient for this scope — Redis would be the natural upgrade
+# for multi-instance deployments, but adds infra overhead not justified here.
+_weather_cache: dict[str, tuple[float, dict]] = {}
+CACHE_TTL_SECONDS = 600  
+
+
+def _cache_key(lat: float, lon: float, days: int, crop: Optional[str]) -> str:
+    return f"{round(lat, 3)}:{round(lon, 3)}:{days}:{crop or 'none'}"
+
+
+def _get_cached(key: str) -> Optional[dict]:
+    entry = _weather_cache.get(key)
+    if not entry:
+        return None
+    timestamp, data = entry
+    if time.time() - timestamp > CACHE_TTL_SECONDS:
+        del _weather_cache[key]
+        return None
+    return data
+
+
+def _set_cached(key: str, data: dict) -> None:
+    _weather_cache[key] = (time.time(), data)
 
 app = FastAPI(
     title="Shamba Weather Advisor",
@@ -40,7 +62,7 @@ class WeatherRequest(BaseModel):
     lat: float
     lon: float
     days: Optional[int] = 7
-    crop: Optional[str] = None  # e.g. "maize", "tea" — used for farming context
+    crop: Optional[str] = None 
 
 
 def get_headers():
@@ -67,8 +89,16 @@ def health():
 async def get_weather(lat: float, lon: float, days: int = 7, crop: Optional[str] = None):
     """
     Fetch weather forecast for a location and generate a farming-specific
-    recommendation based on crop type (if provided).
+    recommendation based on crop type (if provided). Results are cached
+    in-memory per location/crop/days combination to avoid redundant calls
+    to WeatherAI within a short window.
     """
+    key = _cache_key(lat, lon, days, crop)
+    cached = _get_cached(key)
+    if cached:
+        cached["cache_hit"] = True
+        return cached
+
     params = {"lat": lat, "lon": lon, "days": days, "ai": "true", "units": "metric", "lang": "en"}
 
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -93,11 +123,15 @@ async def get_weather(lat: float, lon: float, days: int = 7, crop: Optional[str]
     llm_advisory = await generate_llm_advisory(weather_data, advisory, crop)
     advisory["ai_narrative"] = llm_advisory
 
-    return {
+    result = {
         "location": {"lat": lat, "lon": lon},
         "weather": weather_data,
-        "farming_advisory": advisory
+        "farming_advisory": advisory,
+        "cache_hit": False
     }
+
+    _set_cached(key, result)
+    return result
 
 
 async def generate_llm_advisory(weather_data: dict, rule_based_advisory: dict, crop: Optional[str]) -> str:
