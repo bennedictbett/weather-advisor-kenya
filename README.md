@@ -1,9 +1,8 @@
-# 🌦️ Shamba Weather Advisor
+#  Shamba Weather Advisor
 
 A hyperlocal weather and farming advisory tool for Kenyan smallholder farmers, built as a technical integration assessment for **WeatherAI**.
 
-**Live demo:** _[add deployment link here]_
-**Backend API docs:** _[add deployment link here]_/docs
+> **Note on testing:** I was unable to obtain a WeatherAI API key before the deadline due to a payment requirement I couldn't complete in time. The integration code below is complete and built directly against your documented API shape, but I haven't been able to verify it against a live `/v1/weather` response. I'd welcome the chance to test it live and walk through the code together.
 
 ---
 
@@ -18,6 +17,13 @@ A user selects (or enters) a location in Kenya and an optional crop type (maize,
 3. Displays both the human-readable advisory and the raw weather payload
 
 A second endpoint, `/trees/analyze`, proxies WeatherAI's tree/canopy analysis API directly — accepting a farm photo and returning canopy health insights. This wasn't required by the brief but was included to demonstrate integration with more than one WeatherAI capability.
+
+## Features
+
+- **Hyperlocal weather + farming advisory**: Combines WeatherAI's forecast with a rule-based risk engine (rain, wind) and crop-specific guidance (maize, tea, beans, coffee)
+- **LLM-enriched narrative advisory**: A Groq-powered (Llama 3.3 70B) layer generates a short, farmer-facing summary, grounded strictly in the WeatherAI forecast and the rule-based flags — no information is invented beyond what the source data provides
+- **In-memory response caching**: Identical location/crop/day requests within a 10-minute window are served from cache rather than re-calling WeatherAI, reducing redundant API usage. A simple dict-based cache was sufficient for this scope; Redis would be the natural upgrade for a multi-instance production deployment
+- **Tree/canopy analysis integration**: A second endpoint proxies WeatherAI's `/v1/trees/analyze` API directly, demonstrating integration with more than one WeatherAI capability
 
 ## Why this approach
 
@@ -94,7 +100,7 @@ App available at `http://localhost:3000`
 |---|---|---|
 | GET | `/` | Service info |
 | GET | `/health` | Health check |
-| GET | `/weather` | Fetch forecast + farming advisory for a location |
+| GET | `/weather` | Fetch forecast + rule-based + AI-generated farming advisory for a location (cached) |
 | POST | `/trees/analyze` | Proxy to WeatherAI's canopy/tree analysis API |
 | GET | `/usage` | Check current WeatherAI API usage against plan limits |
 
@@ -116,8 +122,10 @@ GET /weather?lat=-0.5143&lon=35.2698&days=7&crop=maize
     "recommendations": [
       "Heavy rain expected on multiple days — delay planting or harvesting where possible, and check drainage.",
       "For maize: moderate rain is favorable for germination, but monitor for waterlogging in low-lying plots."
-    ]
-  }
+    ],
+    "ai_narrative": "Expect heavy rain over the next few days in your area, which is good news for germinating maize but watch for waterlogging if your plot sits low. Hold off on any planned harvesting until conditions dry out a bit."
+  },
+  "cache_hit": false
 }
 ```
 
@@ -125,8 +133,8 @@ GET /weather?lat=-0.5143&lon=35.2698&days=7&crop=maize
 
 Given more time, I'd extend this in a few directions:
 
-- **RAG layer over historical weather + agronomic documentation** — using an LLM (Claude/Groq) to generate richer, source-cited recommendations rather than rule-based ones, similar to a RAG system I've already built for a different domain ([M-Pesa Financial Advisor](https://github.com/bennedictbett/Mpesa-Adviser-Financial-))
-- **Caching layer** to reduce redundant WeatherAI API calls for the same location within a short window
+- **RAG layer over historical weather + agronomic documentation** — using an LLM (Claude/Groq) to retrieve from a curated knowledge base of agronomic best practices, rather than relying on a single forecast snapshot, similar to a RAG system I've already built for a different domain ([M-Pesa Financial Advisor](https://github.com/bennedictbett/Mpesa-Adviser-Financial-))
+- **Redis-backed caching** for multi-instance deployments, replacing the current in-memory dict cache
 - **SMS/WhatsApp delivery** for farmers without reliable smartphone/data access — a more realistic distribution channel for the target users
 - **Multi-day risk trend visualization** rather than a flat JSON dump
 
@@ -135,4 +143,3 @@ Given more time, I'd extend this in a few directions:
 **Benedict Bett**
 Eldoret, Kenya
 [github.com/bennedictbett](https://github.com/bennedictbett)
-benedictbett08@gmail.com
